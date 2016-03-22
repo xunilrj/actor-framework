@@ -75,6 +75,8 @@ public:
 
   using group_module_factory_vector = std::vector<group_module_factory>;
 
+  using replica_vector = std::vector<std::tuple<value_factory, std::string>>;
+
   // -- nested classes ---------------------------------------------------------
 
   class opt_group {
@@ -212,6 +214,23 @@ public:
     });
   }
 
+  /// Adds replica `Type` to the replicator (if loaded).
+  template <class Type>
+  actor_system_config& add_replica_type(std::string name) {
+    // Add underlying type (aka value_type) of Type
+    using value_type = typename Type::value_type;
+    auto iter = type_names_by_rtti.find(std::type_index(typeid(value_type)));
+    if (iter == type_names_by_rtti.end())
+      add_message_type<value_type>(name + "_value_type");
+    // Add Type
+    add_message_type<Type>(name);
+    // TODO: Eventually deduce type here and push complete type to replicas list
+    //replicas.emplace_back(make_tuple(&make_type_erased_value<Type>,
+    //                      std::move(name)));
+    // TODO: Store name + types to init at replicator
+    return *this;
+  }
+
   /// Stores whether the help text for this config object was
   /// printed. If set to `true`, the application should not use
   /// this config object to initialize an `actor_system` and
@@ -264,6 +283,10 @@ public:
 
   std::string opencl_device_ids;
 
+  // -- config parameters of the replication module ----------------------------
+
+  std::string replication_hosts;
+
   // -- factories --------------------------------------------------------------
 
   value_factory_string_map value_factories_by_name;
@@ -280,6 +303,10 @@ public:
   // -- rendering of user-defined types ----------------------------------------
 
   error_renderer_map error_renderers;
+
+  // -- announced replicas -----------------------------------------------------
+
+  replica_vector replicas;
 
   // -- utility for caf-run ----------------------------------------------------
 

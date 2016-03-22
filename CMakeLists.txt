@@ -343,7 +343,11 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libcaf_opencl/CMakeLists.txt")
   install(DIRECTORY libcaf_opencl/caf/ DESTINATION include/caf
         FILES_MATCHING PATTERN "*.hpp")
 endif()
-
+#install includes from replication
+if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libcaf_replication/CMakeLists.txt")
+  install(DIRECTORY libcaf_replication/caf/ DESTINATION include/caf
+        FILES_MATCHING PATTERN "*.hpp")
+endif()
 # process cmake_uninstall.cmake.in
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/cmake_uninstall.cmake.in"
                "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
@@ -367,6 +371,11 @@ set(LIBCAF_INCLUDE_DIRS
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libcaf_opencl/CMakeLists.txt")
   set(LIBCAF_INCLUDE_DIRS
       "${CMAKE_CURRENT_SOURCE_DIR}/libcaf_opencl/" "${LIBCAF_INCLUDE_DIRS}")
+endif()
+# path to caf replication headers
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/libcaf_replication/CMakeLists.txt")
+  set(LIBCAF_INCLUDE_DIRS
+      "${CMAKE_CURRENT_SOURCE_DIR}/libcaf_replication/" "${LIBCAF_INCLUDE_DIRS}")
 endif()
 # enable tests if not disabled
 if(NOT CAF_NO_UNIT_TESTS)
@@ -458,6 +467,12 @@ if(NOT CAF_NO_OPENCL)
     add_optional_caf_lib(opencl)
     add_optional_caf_binaries(libcaf_opencl/examples)
   endif()
+endif()
+
+# build replication library if not told otherwise
+if(NOT CAF_NO_REPLICATION)
+  add_optional_caf_lib(replication)
+  add_optional_caf_binaries(libcaf_replication/examples)
 endif()
 
 # build Python binding if not being told otherwise
@@ -639,6 +654,7 @@ invertYesNo(CAF_NO_EXCEPTIONS CAF_BUILD_WITH_EXCEPTIONS)
 invertYesNo(CAF_NO_MEM_MANAGEMENT CAF_BUILD_MEM_MANAGEMENT)
 invertYesNo(CAF_NO_BENCHMARKS CAF_BUILD_BENCHMARKS)
 invertYesNo(CAF_NO_OPENCL CAF_BUILD_OPENCL)
+invertYesNo(CAF_NO_REPLICATION CAF_BUILD_REPLICATION)
 invertYesNo(CAF_NO_PYTHON CAF_BUILD_PYTHON)
 # collect all compiler flags
 string(TOUPPER "${CMAKE_BUILD_TYPE}" UPPER_BUILD_TYPE)
@@ -665,6 +681,7 @@ if(NOT CAF_NO_SUMMARY)
         "\nBuild benchmarks:  ${CAF_BUILD_BENCHMARKS}"
         "\nBuild opencl:      ${CAF_BUILD_OPENCL}"
         "\nBuild Python:      ${CAF_BUILD_PYTHON}"
+        "\nBuild replication: ${CAF_BUILD_REPLICATION}"
         "\n"
         "\nCXX:               ${CMAKE_CXX_COMPILER}"
         "\nCXXFLAGS:          ${ALL_CXX_FLAGS}"
