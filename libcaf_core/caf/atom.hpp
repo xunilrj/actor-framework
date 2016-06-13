@@ -155,6 +155,12 @@ using migrate_atom = atom_constant<atom("migrate")>;
 /// Used for triggering periodic operations.
 using tick_atom = atom_constant<atom("tick")>;
 
+/// Used in flow-control signaling.
+using add_source_atom = atom_constant<atom("addSource")>;
+
+/// Used in flow-control signaling.
+using del_source_atom = atom_constant<atom("delSource")>;
+
 } // namespace caf
 
 namespace std {

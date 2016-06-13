@@ -45,7 +45,10 @@ namespace caf {
 local_actor::local_actor(actor_config& cfg)
     : monitorable_actor(cfg),
       context_(cfg.host),
-      initial_behavior_fac_(std::move(cfg.init_fun)) {
+      initial_behavior_fac_(std::move(cfg.init_fun)),
+      open_credit_(50),
+      low_watermark_(10),
+      max_credit_(50) {
   // nop
 }
 
@@ -91,7 +94,6 @@ void local_actor::demonitor(const actor_addr& whom) {
 void local_actor::on_exit() {
   // nop
 }
-
 
 message_id local_actor::new_request_id(message_priority mp) {
   auto result = ++last_request_id_;
@@ -190,7 +192,78 @@ bool local_actor::cleanup(error&& fail_state, execution_unit* host) {
   // tell registry we're done
   unregister_from_system();
   monitorable_actor::cleanup(std::move(fail_state), host);
+  // cleanup remaining state
+  generators_.clear();
   return true;
+}
+
+void local_actor::grant_credit(uint64_t newly_available,
+                               sources_map::iterator cause) {
+  CAF_LOG_TRACE(CAF_ARG(newly_available));
+  open_credit_ += newly_available;
+  bool above_low_watermark = in_flight() > low_watermark();
+  // assign new credit to cause if it ran out of credit
+  // but we wouldn't assign it new credit otherwise
+  if (cause != sources_.end()) {
+    cause->second -= newly_available;
+    if (cause->second == 0 && above_low_watermark) {
+      auto ptr = actor_cast<strong_actor_ptr>(cause->first);
+      if (ptr) {
+        cause->second = open_credit_;
+        ptr->enqueue(make_mailbox_element(ctrl(), message_id::make(),
+                                          {}, sys_atom::value,
+                                          get_atom::value, open_credit_),
+                      context());
+        open_credit_ = 0;
+      }
+      return;
+    }
+  }
+  if (above_low_watermark || sources_.empty())
+    return;
+  // convert weak pointers to strong ones
+  std::vector<actor> src_vec;
+  auto src_iter = sources_.begin();
+  auto src_end = sources_.end();
+  while (src_iter != src_end) {
+    auto ptr = actor_cast<strong_actor_ptr>(src_iter->first);
+    if (! ptr) {
+      open_credit_ += src_iter->second;
+      src_iter = sources_.erase(src_iter);
+    } else {
+      src_vec.emplace_back(actor_cast<actor>(std::move(ptr)));
+      ++src_iter;
+    }
+  }
+  // bail out if no source remains
+  if (sources_.empty())
+    return;
+  CAF_ASSERT(src_vec.size() == sources_.size());
+  // calculate how much new credit we can hand out per source
+  auto credit = open_credit_ / src_vec.size();
+  // make sure we advance at least *some* sources if we can't split
+  // available credit among all sources
+  while (credit == 0) {
+    src_vec.pop_back();
+    credit = open_credit_ / src_vec.size();
+  }
+  CAF_LOG_DEBUG("grant more credit to sources"
+                << CAF_ARG(credit) << CAF_ARG(src_vec));
+//printf("grant more credit to sources: %d %s\n", (int) credit, deep_to_string(src_vec).c_str());
+  // iterate both ranges, update open credit per source and send messages
+  src_iter = sources_.begin();
+  auto i = src_vec.begin();
+  while (i != src_vec.end()) {
+    CAF_ASSERT(src_iter->first == *i);
+    src_iter->second += credit;
+    (*i)->enqueue(make_mailbox_element(ctrl(), message_id::make(),
+                                       {}, sys_atom::value,
+                                       get_atom::value, credit),
+                  context());
+    ++src_iter;
+    ++i;
+  }
+  open_credit_ -= credit * src_vec.size();
 }
 
 } // namespace caf

@@ -85,6 +85,7 @@ set (LIBCAF_CORE_SRCS
      src/shared_spinlock.cpp
      src/skip.cpp
      src/splitter.cpp
+     src/stream_handle.cpp
      src/sync_request_bouncer.cpp
      src/stringification_inspector.cpp
      src/try_match.cpp

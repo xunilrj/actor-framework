@@ -318,6 +318,84 @@ scheduled_actor::message_category
 scheduled_actor::categorize(mailbox_element& x) {
   auto& content = x.content();
   switch (content.type_token()) {
+    // register a new source at a sink
+    case make_type_token<atom_value, atom_value>():
+      if (content.get_as<atom_value>(0) == sys_atom::value
+          && content.get_as<atom_value>(1) == add_source_atom::value) {
+        if (! x.sender) {
+          CAF_LOG_ERROR("received ('sys', 'addSource', X) from anonymous");
+          return message_category::internal;
+        }
+        if (! x.stages.empty()) {
+          CAF_LOG_ERROR("received multi-staged ('sys', 'addSource', X)");
+          return message_category::internal;
+        }
+        if (! sources_.emplace(actor_cast<actor_addr>(x.sender), open_credit_).second) {
+          CAF_LOG_ERROR("multiple 'addSource'" << CAF_ARG(x.sender));
+          return message_category::internal;
+        }
+        if (open_credit_ > 0) {
+          // give new source remaining credit
+          x.sender->enqueue(make_mailbox_element(ctrl(), message_id::make(),
+                                                 {}, sys_atom::value,
+                                                 get_atom::value,
+                                                 open_credit_),
+                             context());
+          open_credit_ = 0;
+        }
+        auto source_addr = actor_cast<actor_addr>(x.sender);
+        weak_actor_ptr weak_this{ctrl()};
+        x.sender->get()->attach_functor([=](const error&, execution_unit* ctx) {
+          auto strong_this = actor_cast<strong_actor_ptr>(weak_this);
+          if (! strong_this)
+            return;
+          strong_this->enqueue(make_mailbox_element(nullptr,
+                                                    message_id::make(), {},
+                                                    sys_atom::value,
+                                                    del_source_atom::value,
+                                                    source_addr),
+                               ctx);
+        });
+        return message_category::internal;
+      }
+      return message_category::ordinary;
+    // remove a source from a sink
+    case make_type_token<atom_value, atom_value, actor_addr>():
+      if (content.get_as<atom_value>(0) == sys_atom::value
+          && content.get_as<atom_value>(1) == del_source_atom::value) {
+        // drop anonymous 'delSource' messages
+        auto src = content.get_as<actor_addr>(2);
+        auto i = sources_.find(src);
+        if (i == sources_.end())
+          return message_category::internal;
+        auto released_credit = i->second;
+        sources_.erase(i);
+        grant_credit(released_credit, sources_.end());
+        return message_category::internal;
+      }
+      return message_category::ordinary;
+    case make_type_token<atom_value, atom_value, uint64_t>():
+      if (content.get_as<atom_value>(0) == sys_atom::value
+          && content.get_as<atom_value>(1) == get_atom::value) {
+        auto num = content.get_as<uint64_t>(2);
+        if (! x.sender) {
+          CAF_LOG_ERROR("received ('sys', 'get', X) from anonymous");
+          return message_category::internal;
+        }
+        auto dest = actor_cast<actor>(x.sender);
+        auto i = generators_.find(dest);
+        if (i == generators_.end()) {
+          CAF_LOG_INFO("dropped ('sys', 'get', X) from unknown sink");
+          return message_category::internal;
+        }
+        auto& f = i->second.first;
+        for (uint64_t n = 0; n < num; ++n)
+          if (! f())
+            return message_category::internal;
+        return message_category::internal;
+      }
+      return message_category::ordinary;
+    // meta information request
     case make_type_token<atom_value, atom_value, std::string>():
       if (content.get_as<atom_value>(0) == sys_atom::value
           && content.get_as<atom_value>(1) == get_atom::value) {
@@ -405,6 +483,15 @@ invoke_message_result scheduled_actor::consume(mailbox_element& x) {
     }
     multiplexed_responses_.erase(mrh);
     return im_success;
+  }
+  // update credits when receiving flow-controlled input
+  if (current_element_->mid.is_flow_controlled()) {
+    if (! current_element_->sender) {
+      CAF_LOG_ERROR("received anonymous flow-controlled message");
+    } else {
+      auto src = sources_.find(actor_cast<actor_addr>(current_element_->sender));
+      grant_credit(1, src);
+    }
   }
   // dispatch on the content of x
   switch (categorize(x)) {

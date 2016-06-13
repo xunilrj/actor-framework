@@ -31,7 +31,6 @@
 #include "caf/expected.hpp"
 #include "caf/optional.hpp"
 #include "caf/make_message.hpp"
-#include "caf/typed_continue_helper.hpp"
 
 #include "caf/detail/int_list.hpp"
 #include "caf/detail/apply_args.hpp"
@@ -47,7 +46,7 @@ public:
     // nop
   }
 
-  // severs as catch-all case for all values producing
+  // serves as catch-all case for all values producing
   // no result such as response_promise
   virtual void operator()() = 0;
 
@@ -85,9 +84,9 @@ public:
   }
 
   // convert values to messages
-  template <class... Ts>
-  void operator()(Ts&... xs) {
-    auto tmp = make_message(std::move(xs)...);
+  template <class T, class... Ts>
+  void operator()(T& x, Ts&... xs) {
+    auto tmp = make_message(std::move(x), std::move(xs)...);
     (*this)(tmp);
   }
 

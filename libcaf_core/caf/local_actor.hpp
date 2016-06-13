@@ -48,6 +48,7 @@
 #include "caf/actor_system.hpp"
 #include "caf/response_type.hpp"
 #include "caf/spawn_options.hpp"
+#include "caf/stream_handle.hpp"
 #include "caf/abstract_actor.hpp"
 #include "caf/abstract_group.hpp"
 #include "caf/execution_unit.hpp"
@@ -96,6 +97,15 @@ public:
   /// A queue optimized for single-reader-many-writers.
   using mailbox_type = detail::single_reader_queue<mailbox_element,
                                                    detail::disposer>;
+
+  /// Stores a generator for flow-controlled streaming.
+  using generator_function = std::function<bool()>;
+
+  /// Context information for flow-controlled streams.
+  using generators_value = std::pair<generator_function, strong_actor_ptr>;
+
+  /// Stores registered sources of flow-controlled input streams.
+  using sources_map = std::unordered_map<actor_addr, uint64_t>;
 
   // -- constructors, destructors, and assignment operators --------------------
 
@@ -290,6 +300,32 @@ public:
   /// The default implementation throws a `std::logic_error`.
   virtual error load_state(deserializer& source, const unsigned int version);
 
+  // -- flow control messaging -------------------------------------------------
+
+  template <class F>
+  stream_handle new_stream(actor sink, F generator) {
+    if (generators_.count(sink) > 0) {
+      CAF_LOG_WARNING("multiple new_stream calls for the same sink");
+      return {};
+    }
+    auto f = [=]() -> bool {
+      auto x = generator();
+      static_assert(is_result<decltype(x)>::value,
+                    "Generator function must return a `result<Ts...>`");
+      if (x.value.empty())
+        return false;
+      auto mid = message_id::from_integer_value(message_id::flow_controlled_flag_mask);
+      sink->enqueue(make_mailbox_element(ctrl(), mid, {}, std::move(x.value)),
+                    context());
+      return true;
+    };
+    generators_.emplace(sink, std::make_pair(std::move(f), ctrl()));
+    sink->enqueue(make_mailbox_element(ctrl(), message_id::make(), {},
+                                       sys_atom::value, add_source_atom::value),
+                  context());
+    return {this, sink};
+  }
+
   // -- here be dragons: end of public interface -------------------------------
 
   /// @cond PRIVATE
@@ -358,6 +394,27 @@ public:
   /// Appends `x` to the cache for later consumption.
   void push_to_cache(mailbox_element_ptr x);
 
+  /// Returns the maximum credit per source.
+  uint64_t max_credit_per_source() const {
+    return max_credit_ / sources_.size();
+  }
+
+  /// Returns how many messages are currently assumbed to be in-flight.
+  uint64_t in_flight() const {
+    return max_credit_ - open_credit_;
+  }
+
+  /// Denotes at which point an actors grants more credit to its sources
+  /// in order to receive more work items.
+  uint64_t low_watermark() const {
+    return low_watermark_;
+  }
+
+  /// Allows sources to send more work item if low watermark is reached
+  /// or if `cause` ran out of credit.
+  virtual void grant_credit(uint64_t newly_available,
+                            sources_map::iterator cause);
+
 protected:
   // -- member variables -------------------------------------------------------
 
@@ -375,6 +432,23 @@ protected:
 
   /// Factory function for returning initial behavior in function-based actors.
   std::function<behavior (local_actor*)> initial_behavior_fac_;
+
+  // Unassigned credit.
+  uint64_t open_credit_;
+
+  // Threshold for demanding more work.
+  uint64_t low_watermark_;
+
+  // Maximum number of allowed "pending" messages.
+  uint64_t max_credit_;
+
+  // Registered sources.
+  sources_map sources_;
+
+  // Generator functions of open streams, the second mapped value is
+  // a strong pointer to `this` in order to keep this actor alive as long
+  // as it has at least one open stream.
+  std::unordered_map<actor, generators_value> generators_;
 };
 
 } // namespace caf

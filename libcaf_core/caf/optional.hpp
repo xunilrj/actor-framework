@@ -146,6 +146,28 @@ class optional {
     return m_valid ? value() : default_value;
   }
 
+  // -- container-like access to optionals
+
+  size_t size() const {
+    return m_valid ? 1 : 0;
+  }
+
+  T* begin() {
+    return &m_value;
+  }
+
+  const T* begin() const {
+    return &m_value;
+  }
+
+  T* end() {
+    return m_valid ? begin() + 1 : begin();
+  }
+
+  const T* end() const {
+    return m_valid ? begin() + 1 : begin();
+  }
+
  private:
   void destroy() {
     if (m_valid) {

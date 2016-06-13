@@ -93,6 +93,28 @@ typename Inspector::result_type inspect(Inspector& f, timeout_msg& x) {
   return f(meta::type_name("timeout_msg"), x.timeout_id);
 }
 
+/// Sources send a SYN message to initiate the
+/// handshake for establishing a stream.
+struct flow_control_syn {
+  strong_actor_ptr source;
+};
+
+/// Sinks send a SYN-ACK message with initial credit to
+/// the source after establishing the stream.
+struct flow_control_syn_ack {
+
+};
+
+/// Sources close a stream by sending FIN to the sink.
+struct flow_control_fin {
+  strong_actor_ptr source;
+};
+
+/// Sinks propagates demand from the sink to the source.
+struct flow_control_demand {
+  size_t amount;
+};
+
 } // namespace caf
 
 #endif // CAF_SYSTEM_MESSAGES_HPP
